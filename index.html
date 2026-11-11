@@ -212,16 +212,29 @@ rateLabel.textContent = settings.rate.toFixed(1) + "倍";
 store.save("koeCoach.settings", settings);
 });
 
+let speakEndHook = null;
+let speakingNow = false;
 function speak(text) {
-if (!synth) { alert("この端末・ブラウザでは読み上げに対応していません。"); return;}
+if (!synth) { alert("この端末・ブラウザでは読み上げに対応していません。"); return; }
 synth.cancel();
 const u = new SpeechSynthesisUtterance(text);
 u.lang = "ja-JP";
 if (jaVoice) u.voice = jaVoice;
 u.rate = settings.rate || 1;
+speakingNow = true;
+const finish = () => {
+  speakingNow = false;
+  if (speakEndHook) { const f = speakEndHook; speakEndHook = null; setTimeout(f, 300); }
+};
+u.onend = finish;
+u.onerror = finish;
 synth.speak(u);
 }
-function stopSpeak() { if (synth) synth.cancel();}
+function stopSpeak() {
+if (synth) synth.cancel();
+speakingNow = false;
+if (speakEndHook) { const f = speakEndHook; speakEndHook = null; setTimeout(f, 300); }
+}
 
 /* ================= レシピデータ ================= */
 /* qty は base 人分あたりの量。pre=true は「大さじ3」のように単位を前に付ける */
@@ -643,74 +656,105 @@ speak("こんにちは。声の料理コーチです。この声で手順を読�
 });
 
 /* ================= 音声コマンド（対応ブラウザのみ表示） ================= */
+/* iPhoneのSafariでは認識が止まりやすいため、再開の仕組みと読み上げ中の
+   一時停止を入れた堅牢版（v2） */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 if (SR) {
-document.getElementById("micSection").classList.remove("hidden");
-const micBtn = document.getElementById("micBtn");
-const micStatus = document.getElementById("micStatus");
-const rec = new SR();
-rec.lang = "ja-JP";
-rec.continuous = true;
-rec.interimResults = false;
-let micOn = false;
+  document.getElementById("micSection").classList.remove("hidden");
+  const micBtn = document.getElementById("micBtn");
+  const micStatus = document.getElementById("micStatus");
+  const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  const rec = new SR();
+  rec.lang = "ja-JP";
+  rec.continuous = !isIOS;
+  rec.interimResults = true;
+  let micOn = false;
+  let recRunning = false;
+  let restartTimer = null;
 
-function parseMinutes(text) {
-const kanji = { "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9};
-let t = text;
-const jm = t.match(/([一二三四五六七八九])?十([一二三四五六七八九])?/);
-if (jm && t.includes("十")) {
-const v = (jm[1]? kanji[jm[1]]: 1) * 10 + (jm[2]? kanji[jm[2]]: 0);
-t = t.replace(jm[0], String(v));
-}
-t = t.replace(/[一二三四五六七八九]/g, c => String(kanji[c]));
-const m = t.match(/(\d+)\s*[ふぷ]ん/);
-return m? Number(m[1]): null;
-}
-function handleCommand(raw) {
-const text = raw.replace(/\s/g, "");
-micStatus.textContent = "聞き取り：" + raw;
-if (/タイマー/.test(text)) {
-const min = parseMinutes(text);
-if (min) {
-mainTimer.set(min);
-hideAlarm();
-mainTimer.start();
-mainStartPauseBtn.textContent = "⏸ 一時停止";
-speak(min + "分のタイマーを始めました。");
-return;
-}
-}
-if (/つぎ|次/.test(text)) { goStep(stepIndex + 1, true); return;}
-if (/まえ|前|もど/.test(text)) { goStep(stepIndex - 1, true); return;}
-if (/よんで|読み上げ|読んで/.test(text)) { speak(currentStepSpeech()); return;}
-if (/とめて|止めて|ストップ/.test(text)) { stopSpeak(); return;}
-if (/さいしょ|最初/.test(text)) { goStep(0, true); return;}
-}
-rec.onresult = (e) => {
-const res = e.results[e.results.length - 1];
-if (res.isFinal) handleCommand(res[0].transcript);
-};
-rec.onend = () => { if (micOn) { try { rec.start();} catch (e) {}}};
-rec.onerror = (e) => {
-if (e.error === "not-allowed") {
-micOn = false;
-micBtn.classList.remove("mic-on", "bg-red-500", "text-white");
-micStatus.textContent = "マイクの使用が許可されませんでした。ブラウザの設定をご確認ください。";
-}
-};
-micBtn.addEventListener("click", () => {
-micOn =!micOn;
-if (micOn) {
-try { rec.start();} catch (e) {}
-micBtn.classList.add("mic-on", "bg-red-500", "text-white");
-micStatus.textContent = "聞き取り中です。話しかけてください。";
-applyWakeLock();
-} else {
-try { rec.stop();} catch (e) {}
-micBtn.classList.remove("mic-on", "bg-red-500", "text-white");
-micStatus.textContent = "オフになっています";
-}
-});
+  function scheduleRestart() {
+    if (!micOn) return;
+    if (restartTimer) clearTimeout(restartTimer);
+    restartTimer = setTimeout(startRec, 350);
+  }
+  function startRec() {
+    if (!micOn || recRunning || speakingNow) return;
+    try { rec.start(); } catch (e) { scheduleRestart(); }
+  }
+  rec.onstart = () => { recRunning = true; };
+  rec.onend = () => { recRunning = false; if (micOn && !speakingNow) scheduleRestart(); };
+  rec.onerror = (e) => {
+    recRunning = false;
+    if (e.error === "not-allowed") {
+      micOn = false;
+      micBtn.classList.remove("mic-on", "bg-red-500", "text-white");
+      micStatus.textContent = "マイクの使用が許可されませんでした。ブラウザの設定をご確認ください。";
+    } else if (micOn) {
+      scheduleRestart();
+    }
+  };
+  const origSpeak = speak;
+  speak = function (text) {
+    if (micOn) {
+      if (recRunning) { try { rec.stop(); } catch (e) {} }
+      speakEndHook = () => startRec();
+    }
+    origSpeak(text);
+  };
+  setInterval(() => { if (micOn && !recRunning && !speakingNow) startRec(); }, 4000);
+
+  function parseMinutes(text) {
+    const kanji = { "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9 };
+    let t = text;
+    const jm = t.match(/([一二三四五六七八九])?十([一二三四五六七八九])?/);
+    if (jm && t.includes("十")) {
+      const v = (jm[1] ? kanji[jm[1]] : 1) * 10 + (jm[2] ? kanji[jm[2]] : 0);
+      t = t.replace(jm[0], String(v));
+    }
+    t = t.replace(/[一二三四五六七八九]/g, c => String(kanji[c]));
+    const m = t.match(/(\d+)\s*[ふぷ]ん/);
+    return m ? Number(m[1]) : null;
+  }
+  function handleCommand(raw) {
+    const text = raw.replace(/\s/g, "");
+    micStatus.textContent = "聞き取り：" + raw;
+    if (/タイマー/.test(text)) {
+      const min = parseMinutes(text);
+      if (min) {
+        mainTimer.set(min);
+        hideAlarm();
+        mainTimer.start();
+        mainStartPauseBtn.textContent = "⏸ 一時停止";
+        speak(min + "分のタイマーを始めました。");
+        return;
+      }
+    }
+    if (/つぎ|次/.test(text)) { goStep(stepIndex + 1, true); return; }
+    if (/まえ|前|もど/.test(text)) { goStep(stepIndex - 1, true); return; }
+    if (/よんで|読み上げ|読んで/.test(text)) { speak(currentStepSpeech()); return; }
+    if (/とめて|止めて|ストップ/.test(text)) { stopSpeak(); return; }
+    if (/さいしょ|最初/.test(text)) { goStep(0, true); return; }
+    micStatus.textContent = "聞き取り：" + raw + "（命令として分かりませんでした）";
+  }
+  rec.onresult = (e) => {
+    const res = e.results[e.results.length - 1];
+    if (res.isFinal) handleCommand(res[0].transcript);
+    else micStatus.textContent = "聞き取り中：" + res[0].transcript;
+  };
+  micBtn.addEventListener("click", () => {
+    micOn = !micOn;
+    if (micOn) {
+      micBtn.classList.add("mic-on", "bg-red-500", "text-white");
+      micStatus.textContent = "聞き取り中です。話しかけてください。";
+      startRec();
+      applyWakeLock();
+    } else {
+      if (restartTimer) clearTimeout(restartTimer);
+      try { rec.stop(); } catch (e) {}
+      micBtn.classList.remove("mic-on", "bg-red-500", "text-white");
+      micStatus.textContent = "オフになっています";
+    }
+  });
 }
 
 /* ================= 初期表示 ================= */
