@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>声の料理コーチ</title>
+<meta name="description" content="手順を声で読み上げてくれる、やさしい料理コーチ。音声コマンドとタイマー付き。">
+<meta name="theme-color" content="#ea580c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="声の料理コーチ">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" href="icon-180.png">
+<meta property="og:title" content="声の料理コーチ">
+<meta property="og:description" content="手順を声で読み上げてくれる、やさしい料理コーチ。音声コマンドとタイマー付き。">
+<meta property="og:image" content="icon-512.png">
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+html { -webkit-tap-highlight-color: transparent;}
+body { font-family: "Hiragino Maru Gothic ProN", "Hiragino Sans", "Noto Sans JP", sans-serif;}
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom);}
+@keyframes steam { 0% { transform: translateY(0); opacity:0} 30% { opacity:.9} 100% { transform: translateY(-10px); opacity:0}}
+.steam span { display:inline-block; animation: steam 2.2s ease-in-out infinite;}
+.steam span:nth-child(2) { animation-delay:.4s}.steam span:nth-child(3) { animation-delay:.8s}
+@keyframes flashRing { 0%,100% { box-shadow: 0 0 0 0 rgba(234,88,12,0)} 50% { box-shadow: 0 0 0 8px rgba(234,88,12,.35)}}
+.finished { animation: flashRing 1s ease-in-out infinite; border-color:#ea580c!important;}
+@keyframes popIn { 0% { transform: scale(.92); opacity:0} 100% { transform: scale(1); opacity:1}}
+.pop { animation: popIn.25s ease-out;}
+@keyframes micPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(220,38,38,.45)} 50% { box-shadow: 0 0 0 10px rgba(220,38,38,0)}}
+.mic-on { animation: micPulse 1.4s ease-in-out infinite;}
+.btn { touch-action: manipulation; user-select:none; -webkit-user-select:none;}
+.btn:active { transform: scale(.96);}
+input[type="range"] { accent-color:#ea580c;}
+.big-text #stepText { font-size:1.5rem; line-height:2;}
+.big-text.timerText,.big-text #mainTimerDisplay { font-size:4.2rem;}
+.checked-item { text-decoration: line-through; opacity:.45;}
+</style>
+</head>
+<body class="bg-orange-50 text-stone-800 min-h-screen safe-bottom">
+
+<!-- ===== ヘッダー ===== -->
+<header class="bg-gradient-to-b from-orange-500 to-orange-400 text-white shadow-md sticky top-0 z-20">
+<div class="max-w-xl mx-auto px-4 py-3 flex items-center gap-3">
+<img src="icon-180.png" alt="声の料理コーチのアイコン" class="w-12 h-12 rounded-2xl shadow bg-white/20">
+<div class="flex-1">
+<h1 class="text-xl font-bold leading-tight">声の料理コーチ</h1>
+<p class="text-orange-50 text-xs">手順を声で読み上げます。手が離せないときの味方です。</p>
+</div>
+<div class="steam text-2xl pr-1" aria-hidden="true"><span>〜</span><span>〜</span><span>〜</span></div>
+</div>
+</header>
+
+<main class="max-w-xl mx-auto px-4 py-4 space-y-5">
+
+<!-- ===== タイマー終了のお知らせ ===== -->
+<div id="alarmBanner" class="hidden pop bg-red-500 text-white rounded-2xl shadow-lg p-4 text-center">
+<p class="text-2xl font-bold">⏰ タイマーが終わりました！</p>
+<p id="alarmText" class="mt-1 text-red-50 text-sm"></p>
+<button id="alarmStop" class="btn mt-3 bg-white text-red-600 font-bold rounded-full px-6 py-2 shadow">止める</button>
+</div>
+
+<!-- ===== レシピ切替 ===== -->
+<section>
+<div id="recipeTabs" class="grid grid-cols-3 gap-2"></div>
+</section>
+
+<!-- ===== 音声コマンド ===== -->
+<section id="micSection" class="hidden bg-white rounded-3xl shadow-md p-4">
+<div class="flex items-center gap-3">
+<button id="micBtn" class="btn w-14 h-14 rounded-full bg-stone-200 text-2xl shrink-0" aria-label="音声コマンドのオン・オフ">🎤</button>
+<div class="flex-1">
+<p class="font-bold text-sm">音声コマンド（手が離せないときに）</p>
+<p class="text-xs text-stone-500">「つぎ」「まえ」「よんで」「タイマー3分」などと話しかけてください。</p>
+<p id="micStatus" class="text-xs text-orange-600 mt-0.5">オフになっています</p>
+</div>
+</div>
+</section>
+
+<!-- ===== 実行画面：いまの手順 ===== -->
+<section class="bg-white rounded-3xl shadow-md p-5">
+<div class="flex items-center justify-between">
+<h2 class="font-bold text-orange-600">🍳 いまの手順</h2>
+<span id="dishNameBadge" class="text-xs bg-orange-100 text-orange-700 rounded-full px-3 py-1"></span>
+</div>
+
+<div class="flex items-center gap-1.5 mt-4" id="stepDots" aria-hidden="true"></div>
+<p class="text-xs text-stone-400 mt-1"><span id="stepCounter"></span> ステップ</p>
+
+<div id="stepCard" class="mt-3 bg-orange-50 border border-orange-100 rounded-2xl p-4 min-h-[7.5rem]">
+<p id="stepText" class="text-lg leading-relaxed font-medium"></p>
+<p class="mt-3 text-sm text-stone-500">💡 <span id="stepTip"></span></p>
+</div>
+
+<div class="grid grid-cols-2 gap-3 mt-4">
+<button id="speakBtn" class="btn bg-orange-500 hover:bg-orange-600 text-white text-lg font-bold rounded-2xl py-3.5 shadow">🔊 読み上げ</button>
+<button id="stopSpeakBtn" class="btn bg-stone-200 hover:bg-stone-300 text-stone-700 text-lg font-bold rounded-2xl py-3.5">⏹ 止める</button>
+<button id="prevBtn" class="btn bg-white border-2 border-orange-200 text-orange-600 font-bold rounded-2xl py-3">← 前へ</button>
+<button id="nextBtn" class="btn bg-white border-2 border-orange-200 text-orange-600 font-bold rounded-2xl py-3">次へ →</button>
+</div>
+<button id="speakAllBtn" class="btn w-full mt-3 text-orange-600 underline underline-offset-2 text-sm py-1">手順を最初から全部読み上げる</button>
+</section>
+
+<!-- ===== 調理中の一覧（食材ごとのタイマー） ===== -->
+<section>
+<h2 class="font-bold text-orange-600 px-1">🍲 調理中の一覧</h2>
+<div id="dishList" class="grid grid-cols-1 gap-3 mt-2"></div>
+</section>
+
+<!-- ===== 共通タイマー ===== -->
+<section class="bg-white rounded-3xl shadow-md p-5">
+<h2 class="font-bold text-orange-600">⏱ かんたんタイマー</h2>
+<p id="mainTimerDisplay" class="text-center text-6xl font-bold tabular-nums tracking-wide my-4 text-stone-700">00:00</p>
+<div class="grid grid-cols-3 gap-2">
+<button data-min="1" class="presetBtn btn bg-orange-100 hover:bg-orange-200 text-orange-700 font-bold rounded-xl py-2.5">1分</button>
+<button data-min="3" class="presetBtn btn bg-orange-100 hover:bg-orange-200 text-orange-700 font-bold rounded-xl py-2.5">3分</button>
+<button data-min="5" class="presetBtn btn bg-orange-100 hover:bg-orange-200 text-orange-700 font-bold rounded-xl py-2.5">5分</button>
+<button data-min="10" class="presetBtn btn bg-orange-100 hover:bg-orange-200 text-orange-700 font-bold rounded-xl py-2.5">10分</button>
+<button data-min="15" class="presetBtn btn bg-orange-100 hover:bg-orange-200 text-orange-700 font-bold rounded-xl py-2.5">15分</button>
+<button data-min="30" class="presetBtn btn bg-orange-100 hover:bg-orange-200 text-orange-700 font-bold rounded-xl py-2.5">30分</button>
+</div>
+<div class="flex items-center gap-2 mt-3">
+<input id="customMin" type="number" inputmode="numeric" min="1" max="999" placeholder="分数を入力"
+class="flex-1 border-2 border-orange-200 rounded-xl px-3 py-2.5 text-center text-lg">
+<button id="customSetBtn" class="btn bg-white border-2 border-orange-300 text-orange-600 font-bold rounded-xl px-4 py-2.5">セット</button>
+</div>
+<div class="grid grid-cols-3 gap-3 mt-4">
+<button id="mainStartPauseBtn" class="btn bg-orange-500 hover:bg-orange-600 text-white text-lg font-bold rounded-2xl py-3 shadow">▶ スタート</button>
+<button id="mainPlusBtn" class="btn bg-white border-2 border-orange-200 text-orange-600 font-bold rounded-2xl py-3">＋1分</button>
+<button id="mainResetBtn" class="btn bg-stone-200 hover:bg-stone-300 text-stone-700 font-bold rounded-2xl py-3">リセット</button>
+</div>
+</section>
+
+<!-- ===== 詳細情報：材料とコツ（買い物リスト兼用） ===== -->
+<section class="bg-white rounded-3xl shadow-md p-5">
+<div class="flex items-center justify-between">
+<h2 class="font-bold text-orange-600">📖 詳細情報</h2>
+<div class="flex items-center gap-1" role="group" aria-label="人数の切替">
+<button data-serv="1" class="servBtn btn text-xs font-bold rounded-full px-3 py-1.5 border-2 border-orange-200">1人分</button>
+<button data-serv="2" class="servBtn btn text-xs font-bold rounded-full px-3 py-1.5 border-2 border-orange-200">2人分</button>
+<button data-serv="4" class="servBtn btn text-xs font-bold rounded-full px-3 py-1.5 border-2 border-orange-200">4人分</button>
+</div>
+</div>
+<p class="text-xs text-stone-400 mt-1">材料は人数に合わせて自動で計算されます。タップすると買い物のチェックが付きます。</p>
+<div id="ingredientList" class="mt-3 space-y-1.5 text-sm"></div>
+<p class="mt-3 text-sm leading-relaxed"><span class="font-bold">コツ：</span><span id="recipeTip"></span></p>
+<button id="speakDetailBtn" class="btn mt-3 bg-orange-100 hover:bg-orange-200 text-orange-700 font-bold rounded-xl px-4 py-2.5">🔊 材料とコツを読み上げる</button>
+</section>
+
+<!-- ===== 設定 ===== -->
+<section class="bg-white rounded-3xl shadow-md p-5">
+<h2 class="font-bold text-orange-600">⚙️ 設定</h2>
+<label class="block mt-4 text-sm font-bold">読み上げの速さ：<span id="rateLabel">1.0倍</span></label>
+<input id="rateRange" type="range" min="0.7" max="1.4" step="0.1" value="1" class="w-full mt-1">
+<div class="space-y-2 mt-4">
+<label class="flex items-center gap-3 bg-orange-50 rounded-xl px-3 py-3">
+<input id="voiceAlarmCheck" type="checkbox" checked class="w-5 h-5">
+<span class="text-sm">タイマーが終わったら、声でも知らせる（あと1分の声かけも）</span>
+</label>
+<label class="flex items-center gap-3 bg-orange-50 rounded-xl px-3 py-3">
+<input id="autoSpeakCheck" type="checkbox" class="w-5 h-5">
+<span class="text-sm">ステップを進めたら、自動で読み上げる</span>
+</label>
+<label class="flex items-center gap-3 bg-orange-50 rounded-xl px-3 py-3">
+<input id="wakeLockCheck" type="checkbox" checked class="w-5 h-5">
+<span class="text-sm">調理中は画面を消さない</span>
+</label>
+<label class="flex items-center gap-3 bg-orange-50 rounded-xl px-3 py-3">
+<input id="bigTextCheck" type="checkbox" class="w-5 h-5">
+<span class="text-sm">大きな文字にする（離れて見る用）</span>
+</label>
+</div>
+<button id="testVoiceBtn" class="btn mt-3 bg-white border-2 border-orange-200 text-orange-600 font-bold rounded-xl px-4 py-2.5">🔊 声のテスト</button>
+</section>
+
+<footer class="text-center text-xs text-stone-400 pb-6">
+<p>声の料理コーチ ― 読み上げは端末の中で行います。設定と進み具合はこの端末に保存されます。</p>
+</footer>
+</main>
+
+<script>
+"use strict";
+
+/* ================= 保存（設定・進み具合） ================= */
+const store = {
+load(key, fallback) { try { const v = localStorage.getItem(key); return v? JSON.parse(v): fallback;} catch (e) { return fallback;}},
+save(key, val) { try { localStorage.setItem(key, JSON.stringify(val));} catch (e) {}}
+};
+const settings = Object.assign(
+{ rate: 1, voiceAlarm: true, autoSpeak: false, wakeLock: true, bigText: false},
+store.load("koeCoach.settings", {})
+);
+const savedState = store.load("koeCoach.state", {});
+
+/* ================= 読み上げ（speechSynthesis） ================= */
+const synth = window.speechSynthesis || null;
+let jaVoice = null;
+function pickVoice() {
+if (!synth) return;
+const voices = synth.getVoices();
+jaVoice = voices.find(v => v.lang && v.lang.toLowerCase().startsWith("ja")) || null;
+}
+if (synth) { pickVoice(); synth.onvoiceschanged = pickVoice;}
+
+const rateRange = document.getElementById("rateRange");
+const rateLabel = document.getElementById("rateLabel");
+rateRange.value = settings.rate;
+rateLabel.textContent = Number(settings.rate).toFixed(1) + "倍";
+rateRange.addEventListener("input", () => {
+settings.rate = Number(rateRange.value);
+rateLabel.textContent = settings.rate.toFixed(1) + "倍";
+store.save("koeCoach.settings", settings);
+});
+
+function speak(text) {
+if (!synth) { alert("この端末・ブラウザでは読み上げに対応していません。"); return;}
+synth.cancel();
+const u = new SpeechSynthesisUtterance(text);
+u.lang = "ja-JP";
+if (jaVoice) u.voice = jaVoice;
+u.rate = settings.rate || 1;
+synth.speak(u);
+}
+function stopSpeak() { if (synth) synth.cancel();}
+
+/* ================= レシピデータ ================= */
+/* qty は base 人分あたりの量。pre=true は「大さじ3」のように単位を前に付ける */
+const recipes = [
+{
+id: "nikujaga", name: "肉じゃが", emoji: "🍲", base: 2,
+tip: "じゃがいもは面取りをすると煮崩れしにくくなります。火を止めてから10分置くと、味がしみておいしくなります。",
+ingredients: [
+{ g: "材料", name: "牛肉", qty: 200, unit: "g"},
+{ g: "材料", name: "じゃがいも", qty: 3, unit: "個"},
+{ g: "材料", name: "玉ねぎ", qty: 1, unit: "個"},
+{ g: "材料", name: "にんじん", qty: 0.5, unit: "本"},
+{ g: "材料", name: "しらたき", qty: 1, unit: "袋"},
+{ g: "調味料", name: "水", qty: 300, unit: "ml"},
+{ g: "調味料", name: "しょうゆ", qty: 3, unit: "大さじ", pre: true},
+{ g: "調味料", name: "みりん", qty: 2, unit: "大さじ", pre: true},
+{ g: "調味料", name: "酒", qty: 2, unit: "大さじ", pre: true},
+{ g: "調味料", name: "砂糖", qty: 1, unit: "大さじ", pre: true},
+{ g: "調味料", name: "だしの素", qty: 1, unit: "小さじ", pre: true}
+],
+steps: [
+{ text: "じゃがいも3個は皮をむいて一口大に切り、水に5分さらします。玉ねぎ1個はくし形に、にんじんは乱切りにします。",
+tip: "じゃがいもの角を少し切り落とす「面取り」をすると、煮崩れしにくくなります。"},
+{ text: "鍋に油を熱し、牛肉200グラムを炒めます。色が変わったら、玉ねぎとにんじんを加えてさらに炒めます。",
+tip: "牛肉は広げて焼くように炒めると、香ばしく仕上がります。"},
+{ text: "じゃがいもと、水にさらしたしらたきを加え、水300ミリリットルと調味料をすべて入れます。",
+tip: "調味料は、酒・みりん・砂糖・しょうゆの順に入れると味がなじみます。"},
+{ text: "沸騰したらアクを取り、落しぶたをして弱めの中火で15分煮ます。下のタイマーを使うと便利です。",
+tip: "落しぶたがないときは、アルミホイルに数か所穴を開けたもので代用できます。"},
+{ text: "じゃがいもに竹串がすっと通ったら、火を止めます。",
+tip: "固いようなら、3分ずつ追加で煮てください。"},
+{ text: "そのまま10分ほど置いて味をしみさせたら、できあがりです。器に盛ってどうぞ。",
+tip: "一度冷まして温め直すと、さらに味がしみます。作り置きにも向いています。"}
+],
+dishes: [
+{ name: "肉じゃが（煮込み）", emoji: "🍲", minutes: 30, dark: false},
+{ name: "ごはん（炊飯）", emoji: "🍚", minutes: 15, dark: true}
+]
+},
+{
+id: "curry", name: "カレーライス", emoji: "🍛", base: 2,
+tip: "ルーは必ず火を止めてから溶かします。玉ねぎをあめ色に炒めると、甘みとコクが出ます。",
+ingredients: [
+{ g: "材料", name: "鶏もも肉", qty: 250, unit: "g"},
+{ g: "材料", name: "じゃがいも", qty: 2, unit: "個"},
+{ g: "材料", name: "玉ねぎ", qty: 1, unit: "個"},
+{ g: "材料", name: "にんじん", qty: 0.5, unit: "本"},
+{ g: "材料", name: "ごはん", qty: 2, unit: "膳分"},
+{ g: "調味料", name: "カレールー", qty: 0.5, unit: "箱"},
+{ g: "調味料", name: "水", qty: 600, unit: "ml"},
+{ g: "調味料", name: "サラダ油", qty: 1, unit: "大さじ", pre: true}
+],
+steps: [
+{ text: "鶏もも肉は一口大に、じゃがいもは大きめに切ります。玉ねぎはくし形、にんじんは乱切りにします。",
+tip: "じゃがいもは煮崩れやすいので、少し大きめがおすすめです。"},
+{ text: "鍋に油を熱し、玉ねぎを中火で5分ほど炒めます。しんなりしたら鶏肉を加え、表面の色が変わるまで炒めます。",
+tip: "玉ねぎをしっかり炒めるほど、甘みが出ます。"},
+{ text: "じゃがいもとにんじん、水600ミリリットルを加え、沸騰したらアクを取ります。",
+tip: "アクを取ると、味がすっきりします。"},
+{ text: "ふたをして弱めの中火で15分煮ます。下のタイマーが便利です。じゃがいもに串が通れば次へ進みます。",
+tip: "煮ている間に、ごはんの支度をしておきましょう。"},
+{ text: "いったん火を止め、カレールーを割り入れてよく溶かします。",
+tip: "熱いまま入れるとダマになりやすいので、必ず火を止めてから。"},
+{ text: "再び弱火にかけ、とろみがつくまで10分ほど煮ます。ごはんにかけたら、できあがりです。",
+tip: "仕上げにウスターソースを少し足すと、味が締まります。"}
+],
+dishes: [
+{ name: "カレー（煮込み）", emoji: "🍛", minutes: 20, dark: false},
+{ name: "ごはん（炊飯）", emoji: "🍚", minutes: 15, dark: true}
+]
+},
+{
+id: "misoshiru", name: "具だくさんみそ汁", emoji: "🍵", base: 2,
+tip: "みそは火を止めてから溶き入れるのが鉄則です。沸騰させると、みその香りが飛んでしまいます。",
+ingredients: [
+{ g: "材料", name: "豆腐", qty: 0.5, unit: "丁"},
+{ g: "材料", name: "油揚げ", qty: 1, unit: "枚"},
+{ g: "材料", name: "長ねぎ", qty: 0.5, unit: "本"},
+{ g: "材料", name: "わかめ（乾燥）", qty: null, unit: "", note: "ひとつかみ"},
+{ g: "調味料", name: "だし汁", qty: 400, unit: "ml"},
+{ g: "調味料", name: "みそ", qty: 2, unit: "大さじ", pre: true}
+],
+steps: [
+{ text: "豆腐は2センチ角に、油揚げは短冊に、長ねぎは小口切りにします。わかめは水で戻しておきます。",
+tip: "油揚げは熱湯をかけると、余分な油が落ちてすっきりします。"},
+{ text: "鍋にだし汁400ミリリットルを入れて温めます。",
+tip: "だしは沸騰直前が香りのピークです。"},
+{ text: "油揚げと豆腐を静かに入れ、2分ほど温めます。下のタイマーが便利です。",
+tip: "豆腐は崩れやすいので、かき混ぜすぎないように。"},
+{ text: "わかめと長ねぎを加え、ひと煮立ちさせます。",
+tip: "わかめは加熱しすぎると色が悪くなります。入れたらすぐ次へ。"},
+{ text: "火を止めて、みそ大さじ2をお玉のだしで溶いてから加えます。沸騰させずに温めたら、できあがりです。",
+tip: "味が薄いときは、みそを小さじ1ずつ足して調整してください。"}
+],
+dishes: [
+{ name: "みそ汁（温め）", emoji: "🍵", minutes: 10, dark: false},
+{ name: "ごはん（炊飯）", emoji: "🍚", minutes: 15, dark: true}
+]
+}
+];
+
+let recipe = recipes.find(r => r.id === savedState.recipeId) || recipes[0];
+let stepIndex = Math.min(savedState.stepIndex || 0, recipe.steps.length - 1);
+let servings = savedState.servings || recipe.base;
+
+/* ================= お知らせ（音＋バナー＋声） ================= */
+let audioCtx = null;
+function beep(times) {
+try {
+audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+if (audioCtx.state === "suspended") audioCtx.resume();
+let t = audioCtx.currentTime;
+for (let i = 0; i < times; i++) {
+const o = audioCtx.createOscillator();
+const g = audioCtx.createGain();
+o.type = "sine"; o.frequency.value = 880;
+g.gain.setValueAtTime(0.0001, t);
+g.gain.exponentialRampToValueAtTime(0.4, t + 0.02);
+g.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+o.connect(g); g.connect(audioCtx.destination);
+o.start(t); o.stop(t + 0.4);
+t += 0.5;
+}
+} catch (e) { /* 音が出ない環境ではバナーと声で知らせる */}
+}
+const alarmBanner = document.getElementById("alarmBanner");
+const alarmText = document.getElementById("alarmText");
+let alarmInterval = null;
+function showAlarm(label) {
+alarmText.textContent = label + " のタイマーが終わりました。";
+alarmBanner.classList.remove("hidden");
+beep(3);
+if (alarmInterval) clearInterval(alarmInterval);
+alarmInterval = setInterval(() => beep(3), 4000);
+if (settings.voiceAlarm) setTimeout(() => speak(label + "のタイマーが終わりました。"), 1600);
+if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+}
+function hideAlarm() {
+alarmBanner.classList.add("hidden");
+if (alarmInterval) { clearInterval(alarmInterval); alarmInterval = null;}
+}
+document.getElementById("alarmStop").addEventListener("click", hideAlarm);
+
+/* ================= 画面を消さない（Wake Lock） ================= */
+let wakeLock = null;
+async function applyWakeLock() {
+try {
+if (settings.wakeLock && "wakeLock" in navigator) {
+wakeLock = await navigator.wakeLock.request("screen");
+} else if (wakeLock) {
+await wakeLock.release(); wakeLock = null;
+}
+} catch (e) { /* 対応していない環境では何もしない */}
+}
+document.addEventListener("visibilitychange", () => {
+if (document.visibilityState === "visible" && settings.wakeLock) applyWakeLock();
+});
+
+/* ================= カウントダウン共通処理 ================= */
+function fmt(sec) {
+sec = Math.max(0, Math.ceil(sec));
+const m = Math.floor(sec / 60), s = sec % 60;
+return String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
+}
+function makeTimer(onTick, onDone, label) {
+let total = 0, remain = 0, endAt = 0, running = false, iv = null, saidOneMin = false;
+function tick() {
+remain = (endAt - Date.now()) / 1000;
+if (settings.voiceAlarm &&!saidOneMin && remain <= 60 && remain > 55) {
+saidOneMin = true;
+speak(label + "、あと1分です。");
+}
+if (remain <= 0) {
+remain = 0; stop(); onTick(0, total); onDone(); return;
+}
+onTick(remain, total);
+}
+function start() {
+if (remain <= 0) return;
+running = true;
+endAt = Date.now() + remain * 1000;
+iv = setInterval(tick, 200);
+tick();
+applyWakeLock();
+}
+function stop() { running = false; if (iv) { clearInterval(iv); iv = null;}}
+function set(min) { stop(); total = min * 60; remain = total; saidOneMin = false; onTick(remain, total);}
+function reset() { stop(); remain = total; saidOneMin = false; onTick(remain, total);}
+function add(sec) {
+total += sec;
+if (running) { endAt += sec * 1000; remain = (endAt - Date.now()) / 1000;}
+else remain += sec;
+if (remain > 60) saidOneMin = false;
+onTick(remain, total);
+}
+return { start, pause: stop, set, reset, add,
+get running() { return running;},
+get remain() { return remain;}};
+}
+
+/* ================= 共通タイマー ================= */
+const mainDisplay = document.getElementById("mainTimerDisplay");
+const mainStartPauseBtn = document.getElementById("mainStartPauseBtn");
+const mainTimer = makeTimer(
+(r) => { mainDisplay.textContent = fmt(r);},
+() => { mainStartPauseBtn.textContent = "▶ スタート"; showAlarm("かんたんタイマー");},
+"かんたんタイマー"
+);
+mainTimer.set(0); mainDisplay.textContent = "00:00";
+document.querySelectorAll(".presetBtn").forEach(b => {
+b.addEventListener("click", () => {
+mainTimer.set(Number(b.dataset.min));
+mainStartPauseBtn.textContent = "▶ スタート";
+});
+});
+document.getElementById("customSetBtn").addEventListener("click", () => {
+const v = Number(document.getElementById("customMin").value);
+if (v > 0) { mainTimer.set(v); mainStartPauseBtn.textContent = "▶ スタート";}
+});
+mainStartPauseBtn.addEventListener("click", () => {
+if (mainTimer.running) { mainTimer.pause(); mainStartPauseBtn.textContent = "▶ スタート";}
+else if (mainTimer.remain > 0) { hideAlarm(); mainTimer.start(); mainStartPauseBtn.textContent = "⏸ 一時停止";}
+});
+document.getElementById("mainPlusBtn").addEventListener("click", () => mainTimer.add(60));
+document.getElementById("mainResetBtn").addEventListener("click", () => {
+mainTimer.reset(); mainStartPauseBtn.textContent = "▶ スタート";
+});
+
+/* ================= 手順の表示 ================= */
+const stepText = document.getElementById("stepText");
+const stepTip = document.getElementById("stepTip");
+const stepCounter = document.getElementById("stepCounter");
+const stepDots = document.getElementById("stepDots");
+const prevBtn = document.getElementById("prevBtn");
+const nextBtn = document.getElementById("nextBtn");
+const dishNameBadge = document.getElementById("dishNameBadge");
+
+function renderStep() {
+stepText.textContent = recipe.steps[stepIndex].text;
+stepTip.textContent = recipe.steps[stepIndex].tip;
+stepCounter.textContent = (stepIndex + 1) + " / " + recipe.steps.length;
+dishNameBadge.textContent = "今日の料理：" + recipe.name;
+stepDots.innerHTML = "";
+recipe.steps.forEach((s, i) => {
+const d = document.createElement("span");
+d.className = "h-2 flex-1 rounded-full " + (i <= stepIndex? "bg-orange-400": "bg-orange-100");
+stepDots.appendChild(d);
+});
+prevBtn.disabled = stepIndex === 0;
+nextBtn.disabled = stepIndex === recipe.steps.length - 1;
+prevBtn.classList.toggle("opacity-40", prevBtn.disabled);
+nextBtn.classList.toggle("opacity-40", nextBtn.disabled);
+store.save("koeCoach.state", { recipeId: recipe.id, stepIndex, servings});
+}
+function currentStepSpeech() {
+const s = recipe.steps[stepIndex];
+return "ステップ" + (stepIndex + 1) + "。" + s.text + " アドバイス。" + s.tip;
+}
+function goStep(n, fromVoice) {
+const next = Math.max(0, Math.min(recipe.steps.length - 1, n));
+if (next === stepIndex &&!fromVoice) return;
+stepIndex = next;
+renderStep();
+if (settings.autoSpeak || fromVoice) speak(currentStepSpeech());
+}
+document.getElementById("speakBtn").addEventListener("click", () => speak(currentStepSpeech()));
+document.getElementById("stopSpeakBtn").addEventListener("click", stopSpeak);
+document.getElementById("speakAllBtn").addEventListener("click", () => {
+speak(recipe.name + "の作り方を、最初から読み上げます。" +
+recipe.steps.map((s, i) => "ステップ" + (i + 1) + "。" + s.text).join(" "));
+});
+prevBtn.addEventListener("click", () => goStep(stepIndex - 1, false));
+nextBtn.addEventListener("click", () => goStep(stepIndex + 1, false));
+
+/* ================= 材料（人数計算＋買い物チェック） ================= */
+function fmtQty(v) {
+if (v == null) return "";
+const rounded = Math.round(v * 2) / 2;
+if (Number.isInteger(rounded)) return String(rounded);
+const whole = Math.floor(rounded);
+return (whole > 0? whole + "と": "") + "1/2";
+}
+function qtyText(ing) {
+if (ing.qty == null) return ing.note || "";
+const v = ing.qty * (servings / recipe.base);
+const q = ing.qty >= 50? String(Math.round(v)): fmtQty(v);
+return ing.pre? ing.unit + q: q + ing.unit;
+}
+const ingredientList = document.getElementById("ingredientList");
+function renderIngredients() {
+ingredientList.innerHTML = "";
+let lastGroup = "";
+recipe.ingredients.forEach(ing => {
+if (ing.g!== lastGroup) {
+lastGroup = ing.g;
+const h = document.createElement("p");
+h.className = "font-bold text-orange-600 pt-2";
+h.textContent = "（" + servings + "人分）";
+ingredientList.appendChild(h);
+}
+const row = document.createElement("button");
+row.className = "btn w-full flex items-center justify-between bg-orange-50 rounded-xl px-3 py-2 text-left";
+row.innerHTML = "<span>" + ing.name + "</span><span class='font-bold'>" + qtyText(ing) + "</span>";
+row.addEventListener("click", () => row.classList.toggle("checked-item"));
+ingredientList.appendChild(row);
+});
+document.getElementById("recipeTip").textContent = recipe.tip;
+document.querySelectorAll(".servBtn").forEach(b => {
+const on = Number(b.dataset.serv) === servings;
+b.classList.toggle("bg-orange-500", on);
+b.classList.toggle("text-white", on);
+b.classList.toggle("border-orange-500", on);
+});
+}
+document.querySelectorAll(".servBtn").forEach(b => {
+b.addEventListener("click", () => {
+servings = Number(b.dataset.serv);
+renderIngredients();
+store.save("koeCoach.state", { recipeId: recipe.id, stepIndex, servings});
+});
+});
+document.getElementById("speakDetailBtn").addEventListener("click", () => {
+const items = recipe.ingredients.map(i => i.name + "、" + (qtyText(i) || "")).join("。");
+speak(recipe.name + "、" + servings + "人分の材料です。" + items + "。コツ。" + recipe.tip);
+});
+
+/* ================= 調理中の一覧（食材ごとのタイマー） ================= */
+const dishList = document.getElementById("dishList");
+let dishTimers = [];
+function renderDishes() {
+dishTimers.forEach(t => t.pause());
+dishTimers = [];
+dishList.innerHTML = "";
+recipe.dishes.forEach((d) => {
+const card = document.createElement("div");
+card.className = "shadow-md rounded-3xl p-4 border-2 border-transparent " + (d.dark? "bg-stone-700 text-white": "bg-white");
+card.innerHTML =
+'<div class="flex items-center justify-between">' +
+'<p class="font-bold">' + d.emoji + " " + d.name + "</p>" +
+'<span class="text-xs rounded-full px-3 py-1 ' + (d.dark? "bg-stone-600": "bg-orange-100 text-orange-700") + '">目安 ' + d.minutes + '分</span>' +
+"</div>" +
+'<p class="timerText text-4xl font-bold tabular-nums text-center my-3">--:--</p>' +
+'<div class="h-2 rounded-full ' + (d.dark? "bg-stone-600": "bg-orange-100") + ' overflow-hidden"><div class="bar h-full bg-orange-400 rounded-full" style="width:100%"></div></div>' +
+'<div class="grid grid-cols-3 gap-2 mt-3">' +
+'<button class="startBtn btn font-bold rounded-xl py-2.5 bg-orange-500 text-white">▶ スタート</button>' +
+'<button class="plusBtn btn font-bold rounded-xl py-2.5 ' + (d.dark? "bg-stone-600": "bg-white border-2 border-orange-200 text-orange-600") + '">＋1分</button>' +
+'<button class="resetBtn btn font-bold rounded-xl py-2.5 ' + (d.dark? "bg-stone-600": "bg-stone-200 text-stone-700") + '">リセット</button>' +
+"</div>";
+dishList.appendChild(card);
+const timerText = card.querySelector(".timerText");
+const bar = card.querySelector(".bar");
+const startBtn = card.querySelector(".startBtn");
+const timer = makeTimer(
+(r, total) => {
+timerText.textContent = fmt(r);
+bar.style.width = (total > 0? (r / total) * 100: 0) + "%";
+},
+() => {
+startBtn.textContent = "▶ スタート";
+card.classList.add("finished");
+showAlarm(d.name);
+setTimeout(() => card.classList.remove("finished"), 12000);
+},
+d.name
+);
+timer.set(d.minutes);
+dishTimers.push(timer);
+startBtn.addEventListener("click", () => {
+if (timer.running) { timer.pause(); startBtn.textContent = "▶ スタート";}
+else { hideAlarm(); card.classList.remove("finished"); timer.start(); startBtn.textContent = "⏸ 一時停止";}
+});
+card.querySelector(".plusBtn").addEventListener("click", () => timer.add(60));
+card.querySelector(".resetBtn").addEventListener("click", () => {
+timer.reset(); card.classList.remove("finished"); startBtn.textContent = "▶ スタート";
+});
+});
+}
+
+/* ================= レシピ切替 ================= */
+const recipeTabs = document.getElementById("recipeTabs");
+function renderTabs() {
+recipeTabs.innerHTML = "";
+recipes.forEach(r => {
+const b = document.createElement("button");
+const on = r.id === recipe.id;
+b.className = "btn rounded-2xl py-3 font-bold shadow " +
+(on? "bg-orange-500 text-white": "bg-white text-stone-600 border-2 border-orange-100");
+b.textContent = r.emoji + " " + r.name;
+b.addEventListener("click", () => {
+if (recipe.id === r.id) return;
+recipe = r;
+stepIndex = 0;
+servings = r.base;
+renderAll();
+speak(r.name + "に切り替えました。");
+});
+recipeTabs.appendChild(b);
+});
+}
+function renderAll() { renderTabs(); renderStep(); renderIngredients(); renderDishes();}
+
+/* ================= 設定の反映 ================= */
+const voiceAlarmCheck = document.getElementById("voiceAlarmCheck");
+const autoSpeakCheck = document.getElementById("autoSpeakCheck");
+const wakeLockCheck = document.getElementById("wakeLockCheck");
+const bigTextCheck = document.getElementById("bigTextCheck");
+voiceAlarmCheck.checked = settings.voiceAlarm;
+autoSpeakCheck.checked = settings.autoSpeak;
+wakeLockCheck.checked = settings.wakeLock;
+bigTextCheck.checked = settings.bigText;
+function applyBigText() { document.body.classList.toggle("big-text", settings.bigText);}
+voiceAlarmCheck.addEventListener("change", () => { settings.voiceAlarm = voiceAlarmCheck.checked; store.save("koeCoach.settings", settings);});
+autoSpeakCheck.addEventListener("change", () => { settings.autoSpeak = autoSpeakCheck.checked; store.save("koeCoach.settings", settings);});
+wakeLockCheck.addEventListener("change", () => { settings.wakeLock = wakeLockCheck.checked; store.save("koeCoach.settings", settings); applyWakeLock();});
+bigTextCheck.addEventListener("change", () => { settings.bigText = bigTextCheck.checked; store.save("koeCoach.settings", settings); applyBigText();});
+applyBigText();
+document.getElementById("testVoiceBtn").addEventListener("click", () => {
+speak("こんにちは。声の料理コーチです。この声で手順を読み上げます。");
+});
+
+/* ================= 音声コマンド（対応ブラウザのみ表示） ================= */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (SR) {
+document.getElementById("micSection").classList.remove("hidden");
+const micBtn = document.getElementById("micBtn");
+const micStatus = document.getElementById("micStatus");
+const rec = new SR();
+rec.lang = "ja-JP";
+rec.continuous = true;
+rec.interimResults = false;
+let micOn = false;
+
+function parseMinutes(text) {
+const kanji = { "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9};
+let t = text;
+const jm = t.match(/([一二三四五六七八九])?十([一二三四五六七八九])?/);
+if (jm && t.includes("十")) {
+const v = (jm[1]? kanji[jm[1]]: 1) * 10 + (jm[2]? kanji[jm[2]]: 0);
+t = t.replace(jm[0], String(v));
+}
+t = t.replace(/[一二三四五六七八九]/g, c => String(kanji[c]));
+const m = t.match(/(\d+)\s*[ふぷ]ん/);
+return m? Number(m[1]): null;
+}
+function handleCommand(raw) {
+const text = raw.replace(/\s/g, "");
+micStatus.textContent = "聞き取り：" + raw;
+if (/タイマー/.test(text)) {
+const min = parseMinutes(text);
+if (min) {
+mainTimer.set(min);
+hideAlarm();
+mainTimer.start();
+mainStartPauseBtn.textContent = "⏸ 一時停止";
+speak(min + "分のタイマーを始めました。");
+return;
+}
+}
+if (/つぎ|次/.test(text)) { goStep(stepIndex + 1, true); return;}
+if (/まえ|前|もど/.test(text)) { goStep(stepIndex - 1, true); return;}
+if (/よんで|読み上げ|読んで/.test(text)) { speak(currentStepSpeech()); return;}
+if (/とめて|止めて|ストップ/.test(text)) { stopSpeak(); return;}
+if (/さいしょ|最初/.test(text)) { goStep(0, true); return;}
+}
+rec.onresult = (e) => {
+const res = e.results[e.results.length - 1];
+if (res.isFinal) handleCommand(res[0].transcript);
+};
+rec.onend = () => { if (micOn) { try { rec.start();} catch (e) {}}};
+rec.onerror = (e) => {
+if (e.error === "not-allowed") {
+micOn = false;
+micBtn.classList.remove("mic-on", "bg-red-500", "text-white");
+micStatus.textContent = "マイクの使用が許可されませんでした。ブラウザの設定をご確認ください。";
+}
+};
+micBtn.addEventListener("click", () => {
+micOn =!micOn;
+if (micOn) {
+try { rec.start();} catch (e) {}
+micBtn.classList.add("mic-on", "bg-red-500", "text-white");
+micStatus.textContent = "聞き取り中です。話しかけてください。";
+applyWakeLock();
+} else {
+try { rec.stop();} catch (e) {}
+micBtn.classList.remove("mic-on", "bg-red-500", "text-white");
+micStatus.textContent = "オフになっています";
+}
+});
+}
+
+/* ================= 初期表示 ================= */
+renderAll();
+</script>
+</body>
+</html>
